@@ -76,15 +76,24 @@ app.post('/api/generate', (req, res) => {
             return res.status(400).json({ error: 'No questions available. Please upload an Excel file first.' });
         }
 
-        const { paperType } = req.body;
+        const { paperType, mainUnit } = req.body;
         let selectedQuestions;
 
-        if (paperType === 'mid1') {
-            selectedQuestions = generateMid1Questions();
-        } else if (paperType === 'mid2') {
-            selectedQuestions = generateMid2Questions();
-        } else {
-            return res.status(400).json({ error: 'Invalid paper type' });
+        switch (paperType) {
+            case 'mid1':
+                selectedQuestions = generateMid1Questions();
+                break;
+            case 'mid2':
+                selectedQuestions = generateMid2Questions();
+                break;
+            case 'special':
+                if (!mainUnit) {
+                    return res.status(400).json({ error: 'Main unit not specified for special mid' });
+                }
+                selectedQuestions = generateSpecialMidQuestions(mainUnit);
+                break;
+            default:
+                return res.status(400).json({ error: 'Invalid paper type' });
         }
 
         res.json({
@@ -100,9 +109,10 @@ app.post('/api/generate', (req, res) => {
         });
     } catch (error) {
         console.error('Error generating questions:', error);
-        res.status(500).json({ error: 'Error generating questions' });
+        res.status(500).json({ error: 'Error generating questions: ' + error.message });
     }
 });
+
 
 // Helper functions
 function processExcelData(data) {
@@ -153,6 +163,27 @@ function generateMid2Questions() {
         ...getRandomQuestions(unit5Questions, 2),
         ...getRandomQuestions([...unit4Questions, ...unit5Questions], 1)
     ];
+}
+
+function generateSpecialMidQuestions(mainUnit) {
+    const mainUnitQuestions = questionBank.filter(q => q.unit === mainUnit);
+    const otherUnitQuestions = questionBank.filter(q => q.unit !== mainUnit);
+    
+    if (mainUnitQuestions.length < 2) {
+        throw new Error(`Insufficient questions in Unit ${mainUnit}`);
+    }
+    
+    if (otherUnitQuestions.length < 4) {
+        throw new Error('Insufficient questions in other units');
+    }
+
+    const selected = [
+        ...getRandomQuestions(mainUnitQuestions, 2), // 2 questions from main unit
+        ...getRandomQuestions(otherUnitQuestions, 4) // 4 questions from other units
+    ];
+
+    // Randomize the final order of questions
+    return selected.sort(() => Math.random() - 0.5);
 }
 
 function getRandomQuestions(questions, count) {
