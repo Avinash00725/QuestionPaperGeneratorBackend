@@ -184,10 +184,15 @@ function generateQuestions(paperType) {
             { level: '3', count: 2 },
             { level: '4', count: 2 }
         ];
+    } else if (maxBTL === 3 && availableBTLs.has('2') && availableBTLs.has('3')) {
+        btlRequirements = [
+            { level: '2', count: 3 },
+            { level: '3', count: 3 }
+        ];
     } else if (availableBTLs.size === 1) {
         btlRequirements = [{ level: [...availableBTLs][0], count: 6 }];
     } else {
-        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with multiple BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 4), or Case iii (single BTL) are supported.`);
+        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 4), Case iii (max BTL = 3 with BTL 2 & 3), or Case iv (single BTL) are supported.`);
     }
     console.log('BTL Requirements:', btlRequirements);
 
