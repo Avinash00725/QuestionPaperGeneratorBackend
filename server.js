@@ -116,16 +116,28 @@ app.post('/api/upload', upload.single('excelFile'), (req, res) => {
     }
 });
 
-// Helper Function to Process Excel Data
+// Helper Function to Process Excel Data with Line Break Handling
 function processExcelData(data) {
     return data.map((row, index) => {
         const btLevelRaw = String(row['B.T Level'] || '').trim();
-        // Remove "L" prefix and ensure numeric BTL
         const btLevel = btLevelRaw.replace(/^L/i, '');
+        
+        // Process question text to handle "<br>" and preserve <br> tags
+        let questionText = row.Question || '';
+        if (typeof questionText === 'string') {
+            // Replace "<br>" (with quotes) with <br> to display as literal text <br>
+            questionText = questionText.replace(/\"<br>\"/g, '<br>');
+            // Preserve existing <br> (without quotes) for line breaks
+            // Optionally, detect points and insert <br> only if no <br> exists
+            if (!questionText.includes('<br>')) {
+                questionText = questionText.replace(/(\d+\.\s|[a-z]\)\s)/g, '$1<br>');
+            }
+        }
+
         return {
             id: index + 1,
             unit: parseInt(row.Unit) || 0,
-            question: row.Question || '',
+            question: questionText, // Use processed question text
             btLevel: btLevel || '0',
             subjectCode: row['Subject Code'] || '',
             subject: row.Subject || '',
@@ -137,6 +149,45 @@ function processExcelData(data) {
             imageUrl: row['Image Url'] ? getDirectImageURL(row['Image Url']) : ''
         };
     }).filter(q => q.unit >= 1 && q.unit <= 5 && q.btLevel !== '0');
+}
+
+// New Function for Max BTL 2 Case
+function generateQuestionsForMaxBTL2() {
+    if (!questionBank || questionBank.length < 6) {
+        throw new Error('Insufficient questions in question bank. At least 6 questions are required.');
+    }
+
+    // Filter questions for BTL 1 and BTL 2
+    const btl1Questions = questionBank.filter(q => q.btLevel === '1');
+    const btl2Questions = questionBank.filter(q => q.btLevel === '2');
+
+    if (btl2Questions.length < 4) {
+        throw new Error(`Insufficient BTL 2 questions: need 4, found ${btl2Questions.length}`);
+    }
+    if (btl1Questions.length < 2) {
+        throw new Error(`Insufficient BTL 1 questions: need 2, found ${btl1Questions.length}`);
+    }
+
+    let selectedQuestions = [];
+    let remainingBTL2 = [...btl2Questions];
+    let remainingBTL1 = [...btl1Questions];
+
+    // Select 4 questions from BTL 2
+    for (let i = 0; i < 4; i++) {
+        const idx = Math.floor(Math.random() * remainingBTL2.length);
+        selectedQuestions.push(remainingBTL2[idx]);
+        remainingBTL2.splice(idx, 1);
+    }
+
+    // Select 2 questions from BTL 1
+    for (let i = 0; i < 2; i++) {
+        const idx = Math.floor(Math.random() * remainingBTL1.length);
+        selectedQuestions.push(remainingBTL1[idx]);
+        remainingBTL1.splice(idx, 1);
+    }
+
+    console.log('Selected Questions for Max BTL 2:', selectedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
+    return selectedQuestions;
 }
 
 // Function to generate questions with strict BTL enforcement
@@ -169,7 +220,12 @@ function generateQuestions(paperType) {
     const maxBTL = Math.max(...btLevels);
     console.log('Max BTL:', maxBTL);
 
-    // Step 3: Define BTL requirements (strict enforcement)
+    // Step 3: Handle Max BTL 2 case
+    if (maxBTL === 2) {
+        return generateQuestionsForMaxBTL2();
+    }
+
+    // Step 4: Define BTL requirements (strict enforcement) for other cases
     let btlRequirements;
     if (maxBTL === 6) {
         btlRequirements = [
@@ -177,6 +233,13 @@ function generateQuestions(paperType) {
             { level: '3', count: 2 },
             { level: '4', count: 1 },
             { level: 'random', options: ['1', '5', '6'], count: 1 }
+        ];
+    } else if (maxBTL === 5) {
+        btlRequirements = [
+            { level: '2', count: 2 },
+            { level: '3', count: 2 },
+            { level: '4', count: 1 },
+            { level: 'random', options: ['1', '5'], count: 1 }
         ];
     } else if (maxBTL === 4) {
         btlRequirements = [
@@ -192,11 +255,11 @@ function generateQuestions(paperType) {
     } else if (availableBTLs.size === 1) {
         btlRequirements = [{ level: [...availableBTLs][0], count: 6 }];
     } else {
-        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 4), Case iii (max BTL = 3 with BTL 2 & 3), or Case iv (single BTL) are supported.`);
+        throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 5), Case iii (max BTL = 4), Case iv (max BTL = 3 with BTL 2 & 3), or Case v (single BTL) are supported.`);
     }
     console.log('BTL Requirements:', btlRequirements);
 
-    // Step 4: Define unit requirements based on paper type
+    // Step 5: Define unit requirements based on paper type
     let unitRequirements;
     switch (paperType) {
         case 'mid1':
@@ -227,7 +290,7 @@ function generateQuestions(paperType) {
     }
     console.log('Unit Requirements:', unitRequirements);
 
-    // Step 5: Select questions with BTL priority
+    // Step 6: Select questions with BTL priority
     const selectQuestions = (btlReqs, unitReqs) => {
         let selectedQuestions = [];
         let unitCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -236,7 +299,6 @@ function generateQuestions(paperType) {
 
         // Helper to pick a question by BTL, adjusting units
         const pickQuestion = (btl) => {
-            // Prioritize units needing more to meet minCount, but allow any allowed unit
             const allowedUnits = unitReqs.map(r => r.unit).sort((a, b) => {
                 const aDiff = unitCount[a] - unitReqs.find(r => r.unit === a).minCount;
                 const bDiff = unitCount[b] - unitReqs.find(r => r.unit === b).minCount;
@@ -264,7 +326,7 @@ function generateQuestions(paperType) {
                     unitReqs.some(u => availableByUnitAndBTL[u.unit][btl]?.length > (btlCount[btl] || 0))
                 );
                 if (randomBTLs.length === 0) {
-                    throw new Error('No questions available for BTL [L1, L5, L6] in required units');
+                    throw new Error(`No questions available for BTL [${req.options.join(', ')}] in required units`);
                 }
                 while (count > 0) {
                     const btl = randomBTLs[Math.floor(Math.random() * randomBTLs.length)];
@@ -316,7 +378,27 @@ function generateQuestions(paperType) {
     return selected;
 }
 
-// API Endpoint to Generate Questions
+// New Fallback Function to Generate Random Questions
+function generateRandomQuestions() {
+    if (!questionBank || questionBank.length < 6) {
+        throw new Error('Insufficient questions in question bank. At least 6 questions are required.');
+    }
+
+    let selectedQuestions = [];
+    let remainingQuestions = [...questionBank];
+
+    // Randomly select 6 questions
+    for (let i = 0; i < 6; i++) {
+        const idx = Math.floor(Math.random() * remainingQuestions.length);
+        selectedQuestions.push(remainingQuestions[idx]);
+        remainingQuestions.splice(idx, 1);
+    }
+
+    console.log('Selected Random Questions:', selectedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
+    return selectedQuestions;
+}
+
+// API Endpoint to Generate Questions with Limited Logging and Fallback
 app.post('/api/generate', (req, res) => {
     try {
         if (!questionBank) {
@@ -324,11 +406,29 @@ app.post('/api/generate', (req, res) => {
         }
 
         const { paperType } = req.body;
-        const selectedQuestions = generateQuestions(paperType);
+        let selectedQuestions;
+
+        try {
+            selectedQuestions = generateQuestions(paperType);
+        } catch (error) {
+            console.warn(`Primary question generation failed: ${error.message}. Falling back to random selection.`);
+            selectedQuestions = generateRandomQuestions();
+        }
+
+        // Log only question, unit, subject, and year to the terminal
+        console.log('Generated Questions (Limited Info):');
+        selectedQuestions.forEach((q, index) => {
+            console.log(`Question ${index + 1}:`);
+            console.log(`  Question: ${q.question}`);
+            console.log(`  Unit: ${q.unit}`);
+            console.log(`  Subject: ${q.subject}`);
+            console.log(`  Year: ${q.year}`);
+            console.log('------------------------');
+        });
 
         res.json({
             questions: selectedQuestions.map(q => ({
-                question: q.question,
+                question: q.question, // Contains <br> tags after processing
                 imageUrl: q.imageUrl,
                 btLevel: q.btLevel,
                 unit: q.unit
