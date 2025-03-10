@@ -125,8 +125,8 @@ function processExcelData(data) {
         // Process question text to handle "<br>" and preserve <br> tags
         let questionText = row.Question || '';
         if (typeof questionText === 'string') {
-            // Replace "<br>" (with quotes) with <br> to display as literal text <br>
-            questionText = questionText.replace(/\"<br>\"/g, '<br>');
+            // Replace "<br>" (with quotes) with &lt;br&gt; to display as literal text <br>
+            questionText = questionText.replace(/\"<br>\"/g, '&lt;br&gt;');
             // Preserve existing <br> (without quotes) for line breaks
             // Optionally, detect points and insert <br> only if no <br> exists
             if (!questionText.includes('<br>')) {
@@ -149,45 +149,6 @@ function processExcelData(data) {
             imageUrl: row['Image Url'] ? getDirectImageURL(row['Image Url']) : ''
         };
     }).filter(q => q.unit >= 1 && q.unit <= 5 && q.btLevel !== '0');
-}
-
-// New Function for Max BTL 2 Case
-function generateQuestionsForMaxBTL2() {
-    if (!questionBank || questionBank.length < 6) {
-        throw new Error('Insufficient questions in question bank. At least 6 questions are required.');
-    }
-
-    // Filter questions for BTL 1 and BTL 2
-    const btl1Questions = questionBank.filter(q => q.btLevel === '1');
-    const btl2Questions = questionBank.filter(q => q.btLevel === '2');
-
-    if (btl2Questions.length < 4) {
-        throw new Error(`Insufficient BTL 2 questions: need 4, found ${btl2Questions.length}`);
-    }
-    if (btl1Questions.length < 2) {
-        throw new Error(`Insufficient BTL 1 questions: need 2, found ${btl1Questions.length}`);
-    }
-
-    let selectedQuestions = [];
-    let remainingBTL2 = [...btl2Questions];
-    let remainingBTL1 = [...btl1Questions];
-
-    // Select 4 questions from BTL 2
-    for (let i = 0; i < 4; i++) {
-        const idx = Math.floor(Math.random() * remainingBTL2.length);
-        selectedQuestions.push(remainingBTL2[idx]);
-        remainingBTL2.splice(idx, 1);
-    }
-
-    // Select 2 questions from BTL 1
-    for (let i = 0; i < 2; i++) {
-        const idx = Math.floor(Math.random() * remainingBTL1.length);
-        selectedQuestions.push(remainingBTL1[idx]);
-        remainingBTL1.splice(idx, 1);
-    }
-
-    console.log('Selected Questions for Max BTL 2:', selectedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
-    return selectedQuestions;
 }
 
 // Function to generate questions with strict BTL enforcement
@@ -220,12 +181,7 @@ function generateQuestions(paperType) {
     const maxBTL = Math.max(...btLevels);
     console.log('Max BTL:', maxBTL);
 
-    // Step 3: Handle Max BTL 2 case
-    if (maxBTL === 2) {
-        return generateQuestionsForMaxBTL2();
-    }
-
-    // Step 4: Define BTL requirements (strict enforcement) for other cases
+    // Step 3: Define BTL requirements (strict enforcement)
     let btlRequirements;
     if (maxBTL === 6) {
         btlRequirements = [
@@ -252,14 +208,19 @@ function generateQuestions(paperType) {
             { level: '2', count: 3 },
             { level: '3', count: 3 }
         ];
-    } else if (availableBTLs.size === 1) {
+    }else if (maxBTL === 2 && availableBTLs.has('2') && availableBTLs.has('1')) {
+        btlRequirements = [
+            { level: '2', count: 6 }
+        ];
+    }
+    else if (availableBTLs.size === 1) {
         btlRequirements = [{ level: [...availableBTLs][0], count: 6 }];
     } else {
         throw new Error(`Unsupported case: Max BTL = ${maxBTL} with BTLs (${[...availableBTLs]}). Only Case i (max BTL = 6), Case ii (max BTL = 5), Case iii (max BTL = 4), Case iv (max BTL = 3 with BTL 2 & 3), or Case v (single BTL) are supported.`);
     }
     console.log('BTL Requirements:', btlRequirements);
 
-    // Step 5: Define unit requirements based on paper type
+    // Step 4: Define unit requirements based on paper type
     let unitRequirements;
     switch (paperType) {
         case 'mid1':
@@ -290,7 +251,7 @@ function generateQuestions(paperType) {
     }
     console.log('Unit Requirements:', unitRequirements);
 
-    // Step 6: Select questions with BTL priority
+    // Step 5: Select questions with BTL priority
     const selectQuestions = (btlReqs, unitReqs) => {
         let selectedQuestions = [];
         let unitCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -378,27 +339,7 @@ function generateQuestions(paperType) {
     return selected;
 }
 
-// New Fallback Function to Generate Random Questions
-function generateRandomQuestions() {
-    if (!questionBank || questionBank.length < 6) {
-        throw new Error('Insufficient questions in question bank. At least 6 questions are required.');
-    }
-
-    let selectedQuestions = [];
-    let remainingQuestions = [...questionBank];
-
-    // Randomly select 6 questions
-    for (let i = 0; i < 6; i++) {
-        const idx = Math.floor(Math.random() * remainingQuestions.length);
-        selectedQuestions.push(remainingQuestions[idx]);
-        remainingQuestions.splice(idx, 1);
-    }
-
-    console.log('Selected Random Questions:', selectedQuestions.map(q => `Unit ${q.unit}, BTL ${q.btLevel}`));
-    return selectedQuestions;
-}
-
-// API Endpoint to Generate Questions with Limited Logging and Fallback
+// API Endpoint to Generate Questions
 app.post('/api/generate', (req, res) => {
     try {
         if (!questionBank) {
@@ -406,16 +347,7 @@ app.post('/api/generate', (req, res) => {
         }
 
         const { paperType } = req.body;
-        let selectedQuestions;
-
-        try {
-            selectedQuestions = generateQuestions(paperType);
-        } catch (error) {
-            console.warn(`Primary question generation failed: ${error.message}. Falling back to random selection.`);
-            selectedQuestions = generateRandomQuestions();
-        }
-
-        // Log only question, unit, subject, and year to the terminal
+        const selectedQuestions = generateQuestions(paperType);
         console.log('Generated Questions (Limited Info):');
         selectedQuestions.forEach((q, index) => {
             console.log(`Question ${index + 1}:`);
